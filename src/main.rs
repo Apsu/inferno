@@ -1,0 +1,42 @@
+use cudarc::driver::{CudaDevice, CudaStream};
+use cudarc::cublaslt::CudaBlasLT;
+
+use inferno::{Linear, Tensor};
+
+fn main() -> anyhow::Result<()> {
+    // Create CUDA context
+    let dev = CudaDevice::new(0)?;
+    let stream = dev.default_stream();
+    let blaslt = CudaBlasLT::new(stream.clone())?;
+
+    let in_features = 4;
+    let out_features = 3;
+    let batch_size = 2;
+
+    // Dummy inputs (row major)
+    let x_host: Vec<f32> = vec![
+        1.0, 2.0, 3.0, 4.0, // sample 1
+        5.0, 6.0, 7.0, 8.0, // sample 2
+    ];
+    let w_host: Vec<f32> = vec![
+        0.1, 0.2, 0.3, 0.4, // out 1
+        0.5, 0.6, 0.7, 0.8, // out 2
+        0.9, 1.0, 1.1, 1.2, // out 3
+    ];
+    let b_host: Vec<f32> = vec![0.01, 0.02, 0.03];
+
+    // Transfer to device
+    let x_dev = dev.htod_copy(&x_host)?;
+    let w_dev = dev.htod_copy(&w_host)?;
+    let b_dev = dev.htod_copy(&b_host)?;
+
+    let input = Tensor::new(x_dev, vec![batch_size, in_features], vec![in_features, 1]);
+
+    let linear = Linear::new(w_dev, Some(b_dev), in_features, out_features, std::sync::Arc::new(blaslt));
+    let output = linear.forward(&input)?;
+
+    let out_host = dev.sync_reclaim(output.data)?;
+    println!("Output: {:?}", &out_host[..]);
+
+    Ok(())
+}
