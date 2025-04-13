@@ -1,11 +1,11 @@
-use cudarc::driver::{CudaDevice, CudaStream};
+use cudarc::driver::{CudaContext, CudaSlice};
 use cudarc::cublaslt::CudaBlasLT;
 
 use inferno::{Linear, Tensor};
 
 fn main() -> anyhow::Result<()> {
     // Create CUDA context
-    let dev = CudaDevice::new(0)?;
+    let dev = CudaContext::new(0)?;
     let stream = dev.default_stream();
     let blaslt = CudaBlasLT::new(stream.clone())?;
 
@@ -26,16 +26,20 @@ fn main() -> anyhow::Result<()> {
     let b_host: Vec<f32> = vec![0.01, 0.02, 0.03];
 
     // Transfer to device
-    let x_dev = dev.htod_copy(&x_host)?;
-    let w_dev = dev.htod_copy(&w_host)?;
-    let b_dev = dev.htod_copy(&b_host)?;
+    let x_dev = unsafe {
+        let mut dst: CudaSlice<f32> = stream.alloc(x_host.len())?;
+        stream.memcpy_htod(&x_host, &mut dst)?;
+        dst
+    };
+    let w_tensor = Tensor::from_host(stream.clone(), &w_host, vec![out_features, in_features], vec![in_features, 1])?;
+    let b_tensor = Tensor::from_host(stream.clone(), &b_host, vec![out_features], vec![1])?;
 
     let input = Tensor::new(x_dev, vec![batch_size, in_features], vec![in_features, 1]);
 
-    let linear = Linear::new(w_dev, Some(b_dev), in_features, out_features, std::sync::Arc::new(blaslt));
+    let linear = Linear::new(w_tensor.data, Some(b_tensor.data), in_features, out_features, blaslt);
     let output = linear.forward(&input)?;
 
-    let out_host = dev.sync_reclaim(output.data)?;
+    let out_host = stream.memcpy_dtov(&output.data)?;
     println!("Output: {:?}", &out_host[..]);
 
     Ok(())

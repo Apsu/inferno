@@ -1,6 +1,5 @@
-use cudarc::cublaslt::{CudaBlasLT, Matmul, MatmulConfig};
-use cudarc::driver::{CudaSlice, CudaStream};
-use std::sync::Arc;
+use cudarc::cublaslt::{CudaBlasLT, Matmul, MatmulConfig, MatmulShared};
+use cudarc::driver::CudaSlice;
 
 use crate::tensor::Tensor;
 
@@ -9,7 +8,7 @@ pub struct Linear {
     pub bias: Option<CudaSlice<f32>>, // shape [out]
     pub in_features: usize,
     pub out_features: usize,
-    pub blaslt: Arc<CudaBlasLT>,
+    pub blaslt: CudaBlasLT,
 }
 
 impl Linear {
@@ -18,7 +17,7 @@ impl Linear {
         bias: Option<CudaSlice<f32>>,
         in_features: usize,
         out_features: usize,
-        blaslt: Arc<CudaBlasLT>,
+        blaslt: CudaBlasLT,
     ) -> Self {
         Self {
             weight,
@@ -35,7 +34,18 @@ impl Linear {
 
         let mut output = stream.alloc_zeros::<f32>(batch_size * self.out_features)?;
 
+        dbg!(
+            batch_size,
+            self.out_features,
+            self.in_features,
+            self.in_features as i64, // lda
+            self.in_features as i64, // ldb
+            self.out_features as i64 // ldc
+        );
+
         unsafe {
+            let bias = self.bias.as_ref().map(|b| b.as_view());
+
             self.blaslt.matmul(
                 MatmulConfig {
                     transa: false,
@@ -46,7 +56,7 @@ impl Linear {
                     alpha: 1.0,
                     beta: 0.0,
                     lda: self.in_features as i64,
-                    ldb: self.in_features as i64,
+                    ldb: self.out_features as i64,
                     ldc: self.out_features as i64,
                     stride_a: None,
                     stride_b: None,
@@ -55,9 +65,9 @@ impl Linear {
                     batch_size: None,
                 },
                 &input.view(),
-                &self.weight.view(),
+                &self.weight.as_view(),
                 &mut output,
-                self.bias.as_ref(),
+                bias.as_ref(),
                 None,
             )?;
         }
