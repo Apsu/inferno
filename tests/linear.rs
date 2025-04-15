@@ -23,7 +23,7 @@ fn test_linear_forward() {
         Tensor::from_host(stream.clone(), &w_host, vec![b, n, k], vec![n * k, k, 1]).unwrap();
     let bias = Tensor::from_host(stream.clone(), &b_host, vec![b, m], vec![m, 1]).unwrap();
 
-    let linear = Linear::new(weight, Some(bias), k, n, blaslt);
+    let linear = Linear::new(weight, Some(bias), blaslt);
     let output = linear.forward(&input).unwrap();
     let out_host = stream.memcpy_dtov(&output.view()).unwrap();
 

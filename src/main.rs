@@ -41,7 +41,7 @@ fn main() -> anyhow::Result<()> {
         vec![1, in_features], // Column-major strides
     )?;
 
-    let linear = Linear::new(weight, None, in_features, out_features, blaslt);
+    let linear = Linear::new(weight, None, blaslt);
     let output = linear.forward(&input)?;
 
     // Print final results in column-major format
