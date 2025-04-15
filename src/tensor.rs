@@ -34,8 +34,7 @@ impl Tensor<f32> {
         shape: Vec<usize>,
         strides: Vec<usize>,
     ) -> anyhow::Result<Self> {
-        let mut dst = unsafe { stream.alloc(data.len())? };
-        stream.memcpy_htod(data, &mut dst)?;
+        let dst = stream.memcpy_stod(data)?;
         Ok(Self::new(dst, shape, strides))
     }
 

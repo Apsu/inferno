@@ -1,46 +1,57 @@
-use cudarc::driver::{CudaContext, CudaSlice};
+use cudarc::driver::CudaContext;
 use cudarc::cublaslt::CudaBlasLT;
 
 use inferno::{Linear, Tensor};
 
 fn main() -> anyhow::Result<()> {
-    // Create CUDA context
     let dev = CudaContext::new(0)?;
     let stream = dev.default_stream();
     let blaslt = CudaBlasLT::new(stream.clone())?;
 
-    let in_features = 4;
-    let out_features = 3;
-    let batch_size = 2;
+    // Matrix dimensions
+    let (batch_size, in_features, out_features) = (2, 4, 3);
 
-    // Dummy inputs (row major)
-    let x_host: Vec<f32> = vec![
-        1.0, 2.0, 3.0, 4.0, // sample 1
-        5.0, 6.0, 7.0, 8.0, // sample 2
+    // Column-major data initialization
+    let x_host = vec![
+        1.0, 5.0,  // Column 0
+        2.0, 6.0,  // Column 1
+        3.0, 7.0,  // Column 2
+        4.0, 8.0,  // Column 3
     ];
-    let w_host: Vec<f32> = vec![
-        0.1, 0.2, 0.3, 0.4, // out 1
-        0.5, 0.6, 0.7, 0.8, // out 2
-        0.9, 1.0, 1.1, 1.2, // out 3
+
+    let w_host = vec![
+        // Column-major weight matrix (4x3)
+        0.1, 0.4, 0.7, 1.0,  // Column 0
+        0.2, 0.5, 0.8, 1.1,  // Column 1
+        0.3, 0.6, 0.9, 1.2,  // Column 2
     ];
-    let b_host: Vec<f32> = vec![0.01, 0.02, 0.03];
 
-    // Transfer to device
-    let x_dev = unsafe {
-        let mut dst: CudaSlice<f32> = stream.alloc(x_host.len())?;
-        stream.memcpy_htod(&x_host, &mut dst)?;
-        dst
-    };
-    let w_tensor = Tensor::from_host(stream.clone(), &w_host, vec![out_features, in_features], vec![in_features, 1])?;
-    let b_tensor = Tensor::from_host(stream.clone(), &b_host, vec![out_features], vec![1])?;
+    // Create tensors with explicit column-major strides
+    let input = Tensor::from_host(
+        stream.clone(),
+        &x_host,
+        vec![batch_size, in_features],
+        vec![1, batch_size]  // Column-major strides
+    )?;
 
-    let input = Tensor::new(x_dev, vec![batch_size, in_features], vec![in_features, 1]);
+    let weight = Tensor::from_host(
+        stream.clone(),
+        &w_host,
+        vec![in_features, out_features],
+        vec![1, in_features]  // Column-major strides
+    )?;
 
-    let linear = Linear::new(w_tensor.data, Some(b_tensor.data), in_features, out_features, blaslt);
+    let linear = Linear::new(weight.data, None, in_features, out_features, blaslt);
     let output = linear.forward(&input)?;
 
+    // Print final results in column-major format
     let out_host = stream.memcpy_dtov(&output.data)?;
-    println!("Output: {:?}", &out_host[..]);
+    println!("\n[RESULT] Output ({}x{} column-major):", batch_size, out_features);
+    for col in 0..out_features {
+        let start = col * batch_size;
+        let end = start + batch_size;
+        println!("Col {}: {:?}", col, &out_host[start..end]);
+    }
 
     Ok(())
 }
