@@ -86,6 +86,7 @@ where
                 MatmulConfig {
                     transa: true,
                     transb: false,
+                    transc: false,
                     m: m as u64,
                     n: n as u64,
                     k: k as u64,

@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.97"
-cudarc = { version = "0.15.1", features = ["cublas", "cublaslt", "cudnn", "f16", "cuda-version-from-build-system"] }
+cudarc = { version = "0.16.0", features = ["cublas", "cublaslt", "cudnn", "f16", "cuda-version-from-build-system"] }
 safetensors = "0.5.3"
 hf-hub = { version = "0.4.2", default-features = false, features = ["ureq", "tokio", "rustls-tls"] }
 tokenizers = { version = "0.21.1", features = ["hf-hub"] }
