@@ -1,7 +1,7 @@
 #define _USE_MATH_DEFINES
 #include <math.h>
 #include <stdint.h>
-#include "../commom.cuh"
+#include "common.cuh"
 
 
 #define UNARY_OP(TYPENAME, FN_NAME, FUNC) \

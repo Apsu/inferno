@@ -1,15 +1,27 @@
-use candle_core::{D, Layout, Shape, shape::Dim};
-use cudarc::driver::{CudaSlice, CudaStream, CudaView, CudaViewMut, DeviceRepr};
+use candle_core::{Layout, Shape, shape::Dim};
+use cudarc::{
+    driver::{
+        CudaSlice, CudaStream, CudaView, CudaViewMut, DeviceRepr, LaunchConfig, PushKernelArg,
+        ValidAsZeroBits,
+    },
+    nvrtc::Ptx,
+};
 use std::sync::Arc;
 
+use crate::modules;
+
+pub trait DTypeLike: DeviceRepr + ValidAsZeroBits {}
+
+impl<T: DeviceRepr + ValidAsZeroBits> DTypeLike for T {}
+
 #[derive(Debug, Clone)]
-pub struct Tensor<T: DeviceRepr> {
+pub struct Tensor<T: DTypeLike> {
     data: CudaSlice<T>,
     layout: Layout,
     stream: Arc<CudaStream>,
 }
 
-impl<T: DeviceRepr> Tensor<T> {
+impl<T: DTypeLike> Tensor<T> {
     pub fn new_strided<S: Into<Shape>>(
         data: CudaSlice<T>,
         shape: S,
@@ -61,7 +73,7 @@ impl<T: DeviceRepr> Tensor<T> {
         self.stream.clone()
     }
 
-    pub fn transpose(&self, a: D, b: D) -> anyhow::Result<Self> {
+    pub fn transpose<A: Dim, B: Dim>(&self, a: A, b: B) -> anyhow::Result<Self> {
         let layout = self.layout.transpose(
             a.to_index(self.shape(), "transpose")?,
             b.to_index(self.shape(), "transpose")?,
@@ -74,8 +86,31 @@ impl<T: DeviceRepr> Tensor<T> {
     }
 
     pub fn to_vec(&self) -> anyhow::Result<Vec<T>> {
-        let out_host = self.stream.memcpy_dtov(&self.view()).unwrap();
-        todo!()
+        let elem_count = self.shape().elem_count();
+        let rank = self.shape().rank();
+        let x = self.data.as_view();
+
+        let mut out = self.stream.alloc_zeros::<T>(elem_count)?;
+        let info = self
+            .stream
+            .memcpy_stod(&[self.shape().dims(), self.layout().stride()].concat())?;
+
+        let module = self
+            .stream
+            .context()
+            .load_module(Ptx::from_src(modules::UNARY))?;
+        let func = module.load_function("ucopy_f32")?;
+        let mut builder = self.stream.launch_builder(&func);
+
+        builder.arg(&elem_count);
+        builder.arg(&rank);
+        builder.arg(&info);
+        builder.arg(&x);
+        builder.arg(&mut out);
+        unsafe { builder.launch(LaunchConfig::for_num_elems(elem_count as u32))? };
+
+        let out_host = self.stream.memcpy_dtov(&out).unwrap();
+        Ok(out_host)
     }
 
     pub(crate) fn verify_all_same_device(&self, others: &[&Tensor<T>]) -> anyhow::Result<()> {

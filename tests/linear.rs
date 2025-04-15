@@ -23,15 +23,16 @@ fn test_linear_forward() {
 
     let linear = Linear::new(weight, Some(bias));
     let output = linear.forward(&input).unwrap();
-    let out_host = stream.memcpy_dtov(&output.view()).unwrap();
+    let out_host = output.to_vec().unwrap();
 
     assert_eq!(out_host.len(), b * m * n);
     assert_eq!(output.shape().dims3().unwrap(), (b, m, n));
     assert_eq!(
         out_host,
         [
-            30f32, 81., 132., 80., 256., 432., 130., 431., 732., 180., 606., 1032., 1883., 2434.,
-            2985., 2308., 2984., 3660., 2733., 3534., 4335., 3158., 4084., 5010.
+            30f32, 80.0, 130.0, 180.0, 81.0, 256.0, 431.0, 606.0, 132.0, 432.0, 732.0, 1032.0,
+            1883.0, 2308.0, 2733.0, 3158.0, 2434.0, 2984.0, 3534.0, 4084.0, 2985.0, 3660.0, 4335.0,
+            5010.0
         ]
     );
 }

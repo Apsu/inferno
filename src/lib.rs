@@ -1,5 +1,6 @@
 pub mod linear;
 pub mod model;
+pub(crate) mod modules;
 pub mod tensor;
 
 pub use linear::Linear;
