@@ -1,29 +1,22 @@
 // linear.rs
 use crate::tensor::Tensor;
-use candle_core::Shape;
+use candle_core::{D, Shape};
 use cudarc::cublaslt::{CudaBlasLT, Matmul, MatmulConfig, MatmulShared};
 
 pub struct Linear {
-    pub weight: Tensor<f32>,       // shape [in, out]
-    pub bias: Option<Tensor<f32>>, // shape [out]
-    pub in_features: usize,
-    pub out_features: usize,
+    pub weight: Tensor<f32>,
+    pub bias: Option<Tensor<f32>>,
     pub blaslt: CudaBlasLT,
 }
 
 impl Linear {
-    pub fn new(
-        weight: Tensor<f32>,
-        bias: Option<Tensor<f32>>,
-        in_features: usize,
-        out_features: usize,
-        blaslt: CudaBlasLT,
-    ) -> Self {
+    /// * `weight` - Input tensor of size BxNxK
+    /// * `.bias` - Optional bias tensor of size M
+    pub fn new(weight: Tensor<f32>, bias: Option<Tensor<f32>>) -> Self {
+        let blaslt = CudaBlasLT::new(weight.stream()).unwrap();
         Self {
             weight,
             bias,
-            in_features,
-            out_features,
             blaslt,
         }
     }
@@ -32,8 +25,13 @@ impl Linear {
     /// * `self.weight` - Input tensor of size BxNxK
     /// * `self.bias` - Optional bias tensor of size M
     ///
-    /// The resulting tensor is of shape BxNxM
+    /// The resulting tensor is of shape BxMxN
     pub fn forward(&self, input: &Tensor<f32>) -> anyhow::Result<Tensor<f32>> {
+        self.weight.verify_all_same_device(&[input])?;
+        if let Some(b) = &self.bias {
+            self.weight.verify_all_same_device(&[b])?;
+        }
+
         // Assume TN
         let (batch_size, m, k) = input.shape().dims3()?;
         let (b_0, n, b_2) = self.weight.shape().dims3()?;
@@ -110,6 +108,7 @@ impl Linear {
             )?;
         }
 
-        Ok(Tensor::new_contiguous(out, out_shape, 0))
+        let res = Tensor::new_contiguous(out, out_shape, 0);
+        res.transpose(D::Minus1, D::Minus2)
     }
 }
