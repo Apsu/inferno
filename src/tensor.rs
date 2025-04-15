@@ -74,10 +74,12 @@ impl<T: DTypeLike> Tensor<T> {
         Self::from_raw(dst, layout)
     }
 
+    /// This returns a pre-sliced view of the tensor data.
     pub fn view(&self) -> CudaView<T> {
         self.data.as_view().slice(self.layout.start_offset()..)
     }
 
+    /// This returns a pre-sliced view of the tensor data.
     pub fn view_mut(&mut self) -> CudaViewMut<T> {
         self.data
             .as_view_mut()
