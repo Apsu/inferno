@@ -60,7 +60,7 @@ where
                 if bias_l.shape().dims1()? != m {
                     anyhow::bail!("Bias does not have the correct shape");
                 }
-                (Some(bias.view().slice(bias_l.start_offset()..)), None)
+                (Some(bias.view()), None)
             } else {
                 if bias_l.shape().dims2()?.1 != m {
                     anyhow::bail!("Bias does not have the correct shape");
@@ -69,10 +69,7 @@ where
                     anyhow::bail!("Bias batch size must match batch size of `a`");
                 }
                 let bias_stride = bias_l.stride()[0] as i64;
-                (
-                    Some(bias.view().slice(bias_l.start_offset()..)),
-                    Some(bias_stride),
-                )
+                (Some(bias.view()), Some(bias_stride))
             }
         } else {
             (None, None)
