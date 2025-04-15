@@ -1,4 +1,3 @@
-use cudarc::cublaslt::CudaBlasLT;
 use cudarc::driver::CudaContext;
 use inferno::{Linear, Tensor};
 
@@ -6,7 +5,6 @@ use inferno::{Linear, Tensor};
 fn test_linear_forward() {
     let dev = CudaContext::new(0).unwrap();
     let stream = dev.default_stream();
-    let blaslt = CudaBlasLT::new(stream.clone()).unwrap();
 
     let b = 2;
     let m = 3;
@@ -23,12 +21,12 @@ fn test_linear_forward() {
         Tensor::from_host(stream.clone(), &w_host, vec![b, n, k], vec![n * k, k, 1]).unwrap();
     let bias = Tensor::from_host(stream.clone(), &b_host, vec![b, m], vec![m, 1]).unwrap();
 
-    let linear = Linear::new(weight, Some(bias), blaslt);
+    let linear = Linear::new(weight, Some(bias));
     let output = linear.forward(&input).unwrap();
     let out_host = stream.memcpy_dtov(&output.view()).unwrap();
 
     assert_eq!(out_host.len(), b * m * n);
-    assert_eq!(output.shape().dims3().unwrap(), (b, n, m));
+    assert_eq!(output.shape().dims3().unwrap(), (b, m, n));
     assert_eq!(
         out_host,
         [

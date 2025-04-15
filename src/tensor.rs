@@ -1,15 +1,15 @@
-use candle_core::{Layout, Shape};
-use cudarc::driver::{CudaSlice, CudaStream, CudaView, CudaViewMut};
+use candle_core::{D, Layout, Shape, shape::Dim};
+use cudarc::driver::{CudaSlice, CudaStream, CudaView, CudaViewMut, DeviceRepr};
 use std::sync::Arc;
 
-#[derive(Debug)]
-pub struct Tensor<T> {
+#[derive(Debug, Clone)]
+pub struct Tensor<T: DeviceRepr> {
     data: CudaSlice<T>,
     layout: Layout,
-    shape: Shape,
+    stream: Arc<CudaStream>,
 }
 
-impl<T> Tensor<T> {
+impl<T: DeviceRepr> Tensor<T> {
     pub fn new_strided<S: Into<Shape>>(
         data: CudaSlice<T>,
         shape: S,
@@ -18,9 +18,9 @@ impl<T> Tensor<T> {
     ) -> Self {
         let shape = shape.into();
         Self {
+            stream: data.stream().clone(),
             data,
-            layout: Layout::new(shape.clone(), stride, start_offset),
-            shape,
+            layout: Layout::new(shape, stride, start_offset),
         }
     }
 
@@ -31,9 +31,9 @@ impl<T> Tensor<T> {
     ) -> Self {
         let shape = shape.into();
         Self {
+            stream: data.stream().clone(),
             data,
             layout: Layout::contiguous_with_offset(shape.clone(), start_offset),
-            shape,
         }
     }
 
@@ -50,11 +50,40 @@ impl<T> Tensor<T> {
     }
 
     pub fn shape(&self) -> &Shape {
-        &self.shape
+        self.layout.shape()
     }
 
     pub fn layout(&self) -> &Layout {
         &self.layout
+    }
+
+    pub fn stream(&self) -> Arc<CudaStream> {
+        self.stream.clone()
+    }
+
+    pub fn transpose(&self, a: D, b: D) -> anyhow::Result<Self> {
+        let layout = self.layout.transpose(
+            a.to_index(self.shape(), "transpose")?,
+            b.to_index(self.shape(), "transpose")?,
+        )?;
+        Ok(Self {
+            stream: self.stream.clone(),
+            data: self.data.clone(),
+            layout,
+        })
+    }
+
+    pub fn to_vec(&self) -> anyhow::Result<Vec<T>> {
+        let out_host = self.stream.memcpy_dtov(&self.view()).unwrap();
+        todo!()
+    }
+
+    pub(crate) fn verify_all_same_device(&self, others: &[&Tensor<T>]) -> anyhow::Result<()> {
+        let ord = self.stream.context().ordinal();
+        if others.iter().any(|x| x.stream.context().ordinal() != ord) {
+            anyhow::bail!("All tensors must be on the same device ordinal.")
+        }
+        Ok(())
     }
 }
 

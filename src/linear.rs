@@ -1,6 +1,6 @@
 // linear.rs
 use crate::tensor::Tensor;
-use candle_core::Shape;
+use candle_core::{D, Shape};
 use cudarc::cublaslt::{CudaBlasLT, Matmul, MatmulConfig, MatmulShared};
 
 pub struct Linear {
@@ -12,7 +12,8 @@ pub struct Linear {
 impl Linear {
     /// * `weight` - Input tensor of size BxNxK
     /// * `.bias` - Optional bias tensor of size M
-    pub fn new(weight: Tensor<f32>, bias: Option<Tensor<f32>>, blaslt: CudaBlasLT) -> Self {
+    pub fn new(weight: Tensor<f32>, bias: Option<Tensor<f32>>) -> Self {
+        let blaslt = CudaBlasLT::new(weight.stream()).unwrap();
         Self {
             weight,
             bias,
@@ -24,8 +25,13 @@ impl Linear {
     /// * `self.weight` - Input tensor of size BxNxK
     /// * `self.bias` - Optional bias tensor of size M
     ///
-    /// The resulting tensor is of shape BxNxM
+    /// The resulting tensor is of shape BxMxN
     pub fn forward(&self, input: &Tensor<f32>) -> anyhow::Result<Tensor<f32>> {
+        self.weight.verify_all_same_device(&[input])?;
+        if let Some(b) = &self.bias {
+            self.weight.verify_all_same_device(&[b])?;
+        }
+
         // Assume TN
         let (batch_size, m, k) = input.shape().dims3()?;
         let (b_0, n, b_2) = self.weight.shape().dims3()?;
@@ -102,6 +108,7 @@ impl Linear {
             )?;
         }
 
-        Ok(Tensor::new_contiguous(out, out_shape, 0))
+        let res = Tensor::new_contiguous(out, out_shape, 0);
+        res.transpose(D::Minus1, D::Minus2)
     }
 }

@@ -1,4 +1,3 @@
-use cudarc::cublaslt::CudaBlasLT;
 use cudarc::driver::CudaContext;
 
 use inferno::{Linear, Tensor};
@@ -6,7 +5,6 @@ use inferno::{Linear, Tensor};
 fn main() -> anyhow::Result<()> {
     let dev = CudaContext::new(0)?;
     let stream = dev.default_stream();
-    let blaslt = CudaBlasLT::new(stream.clone())?;
 
     // Matrix dimensions
     let (batch_size, in_features, out_features) = (2, 4, 3);
@@ -41,7 +39,7 @@ fn main() -> anyhow::Result<()> {
         vec![1, in_features], // Column-major strides
     )?;
 
-    let linear = Linear::new(weight, None, blaslt);
+    let linear = Linear::new(weight, None);
     let output = linear.forward(&input)?;
 
     // Print final results in column-major format
