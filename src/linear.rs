@@ -1,11 +1,11 @@
 // linear.rs
 use crate::tensor::Tensor;
+use candle_core::Shape;
 use cudarc::cublaslt::{CudaBlasLT, Matmul, MatmulConfig, MatmulShared};
-use cudarc::driver::CudaSlice;
 
 pub struct Linear {
-    pub weight: CudaSlice<f32>,       // shape [in, out]
-    pub bias: Option<CudaSlice<f32>>, // shape [out]
+    pub weight: Tensor<f32>,       // shape [in, out]
+    pub bias: Option<Tensor<f32>>, // shape [out]
     pub in_features: usize,
     pub out_features: usize,
     pub blaslt: CudaBlasLT,
@@ -13,8 +13,8 @@ pub struct Linear {
 
 impl Linear {
     pub fn new(
-        weight: CudaSlice<f32>,
-        bias: Option<CudaSlice<f32>>,
+        weight: Tensor<f32>,
+        bias: Option<Tensor<f32>>,
         in_features: usize,
         out_features: usize,
         blaslt: CudaBlasLT,
@@ -29,61 +29,82 @@ impl Linear {
     }
 
     pub fn forward(&self, input: &Tensor<f32>) -> anyhow::Result<Tensor<f32>> {
-        let batch_size = input.shape[0];
+        // Assume TN
+        let (batch_size, m, k) = input.shape().dims3()?;
+        let (b_0, n, b_2) = self.weight.shape().dims3()?;
         let stream = self.blaslt.stream();
 
-        // Allocate output tensor with column-major layout
-        let mut output = stream.alloc_zeros::<f32>(batch_size * self.out_features)?;
+        if b_2 != k {
+            anyhow::bail!("This layer only supports TN layout");
+        }
+
+        if b_0 != batch_size {
+            anyhow::bail!("`b` must have the same batch size as `a`")
+        }
+
+        let lda = k;
+        let ldb = k;
+        let ldc = m;
+
+        let out_shape = Shape::from((batch_size, n, m));
+
+        let (bias, bias_stride) = if let Some(bias) = &self.bias {
+            let bias_l = bias.layout();
+            if bias_l.dims().len() == 1 {
+                if bias_l.shape().dims1()? != m {
+                    anyhow::bail!("Bias does not have the correct shape");
+                }
+                (Some(bias.view().slice(bias_l.start_offset()..)), None)
+            } else {
+                if bias_l.shape().dims2()?.1 != m {
+                    anyhow::bail!("Bias does not have the correct shape");
+                }
+                if bias_l.shape().dims2()?.0 != batch_size {
+                    anyhow::bail!("Bias batch size must match batch size of `a`");
+                }
+                let bias_stride = bias_l.stride()[0] as i64;
+                (
+                    Some(bias.view().slice(bias_l.start_offset()..)),
+                    Some(bias_stride),
+                )
+            }
+        } else {
+            (None, None)
+        };
+
+        let (mut out, stride_c) = {
+            // Allocate out tensor
+            (stream.alloc_zeros::<f32>(out_shape.elem_count())?, (n * m))
+        };
 
         unsafe {
-            // Validate tensor layouts
-            self.validate_shapes(input)?;
-
             // Perform cuBLASLt matmul
             self.blaslt.matmul(
                 MatmulConfig {
-                    transa: false,
+                    transa: true,
                     transb: false,
-                    m: batch_size as u64,
-                    n: self.out_features as u64,
-                    k: self.in_features as u64,
-                    alpha: 1.0,
-                    beta: 0.0,
-                    lda: batch_size as i64, // Column-major: rows of input
-                    ldb: self.in_features as i64, // Column-major: rows of weight
-                    ldc: batch_size as i64, // Column-major: rows of output
-                    stride_a: None,
-                    stride_b: None,
-                    stride_c: None,
-                    stride_bias: Some(1),
-                    batch_size: None,
+                    m: m as u64,
+                    n: n as u64,
+                    k: k as u64,
+                    alpha: 1.0, //self.alpha.unwrap_or(1.0),
+                    lda: lda as i64,
+                    ldb: ldb as i64,
+                    beta: 0.0, //self.beta.unwrap_or(0.0),
+                    ldc: ldc as i64,
+                    stride_a: Some(input.layout().stride()[0] as i64),
+                    stride_b: Some(self.weight.layout().stride()[0] as i64),
+                    stride_c: Some(stride_c as i64),
+                    stride_bias: bias_stride,
+                    batch_size: Some(batch_size as i32),
                 },
                 &input.view(),
-                &self.weight.as_view(),
-                &mut output,
-                self.bias.as_ref().map(|b| b.as_view()).as_ref(),
+                &self.weight.view(),
+                &mut out,
+                bias.as_ref(),
                 None,
             )?;
         }
 
-        Ok(Tensor::new(
-            output,
-            vec![batch_size, self.out_features],
-            vec![1, batch_size], // Column-major strides
-        ))
-    }
-
-    fn validate_shapes(&self, input: &Tensor<f32>) -> anyhow::Result<()> {
-        assert_eq!(
-            input.strides,
-            vec![1, input.shape[0]],
-            "Input must be column-major"
-        );
-        assert_eq!(
-            self.weight.len(),
-            self.in_features * self.out_features,
-            "Weight matrix size mismatch"
-        );
-        Ok(())
+        Ok(Tensor::new_contiguous(out, out_shape, 0))
     }
 }
