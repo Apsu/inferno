@@ -28,6 +28,11 @@ impl Linear {
         }
     }
 
+    /// * `input` - Input tensor of size BxMxK
+    /// * `self.weight` - Input tensor of size BxNxK
+    /// * `self.bias` - Optional bias tensor of size M
+    ///
+    /// The resulting tensor is of shape BxNxM
     pub fn forward(&self, input: &Tensor<f32>) -> anyhow::Result<Tensor<f32>> {
         // Assume TN
         let (batch_size, m, k) = input.shape().dims3()?;
