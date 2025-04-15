@@ -10,9 +10,13 @@ use std::sync::Arc;
 
 use crate::modules;
 
-pub trait DTypeLike: DeviceRepr + ValidAsZeroBits {}
+pub trait DTypeLike: DeviceRepr + ValidAsZeroBits + Clone + Copy {
+    const DTYPE: &'static str;
+}
 
-impl<T: DeviceRepr + ValidAsZeroBits> DTypeLike for T {}
+impl DTypeLike for f32 {
+    const DTYPE: &'static str = "f32";
+}
 
 #[derive(Debug, Clone)]
 pub struct Tensor<T: DTypeLike> {
@@ -85,31 +89,40 @@ impl<T: DTypeLike> Tensor<T> {
         })
     }
 
+    pub fn contiguous(&self) -> anyhow::Result<Self> {
+        if self.layout.is_contiguous() {
+            return Ok(self.clone());
+        } else {
+            let elem_count = self.shape().elem_count();
+            let rank = self.shape().rank();
+            let x = self.data.as_view().slice(self.layout.start_offset()..);
+
+            let mut out = self.stream.alloc_zeros::<T>(elem_count)?;
+            let info = self
+                .stream
+                .memcpy_stod(&[self.shape().dims(), self.layout().stride()].concat())?;
+
+            let module = self
+                .stream
+                .context()
+                .load_module(Ptx::from_src(modules::UNARY))?;
+            let func = module.load_function(&format!("ucopy_{}", T::DTYPE))?;
+            let mut builder = self.stream.launch_builder(&func);
+
+            builder.arg(&elem_count);
+            builder.arg(&rank);
+            builder.arg(&info);
+            builder.arg(&x);
+            builder.arg(&mut out);
+            unsafe { builder.launch(LaunchConfig::for_num_elems(elem_count as u32))? };
+
+            Ok(Self::new_contiguous(out, self.shape().clone(), 0))
+        }
+    }
+
     pub fn to_vec(&self) -> anyhow::Result<Vec<T>> {
-        let elem_count = self.shape().elem_count();
-        let rank = self.shape().rank();
-        let x = self.data.as_view();
-
-        let mut out = self.stream.alloc_zeros::<T>(elem_count)?;
-        let info = self
-            .stream
-            .memcpy_stod(&[self.shape().dims(), self.layout().stride()].concat())?;
-
-        let module = self
-            .stream
-            .context()
-            .load_module(Ptx::from_src(modules::UNARY))?;
-        let func = module.load_function("ucopy_f32")?;
-        let mut builder = self.stream.launch_builder(&func);
-
-        builder.arg(&elem_count);
-        builder.arg(&rank);
-        builder.arg(&info);
-        builder.arg(&x);
-        builder.arg(&mut out);
-        unsafe { builder.launch(LaunchConfig::for_num_elems(elem_count as u32))? };
-
-        let out_host = self.stream.memcpy_dtov(&out).unwrap();
+        let res = self.contiguous()?;
+        let out_host = self.stream.memcpy_dtov(&res.view()).unwrap();
         Ok(out_host)
     }
 
