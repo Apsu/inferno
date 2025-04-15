@@ -6,6 +6,7 @@ use cudarc::{
     },
     nvrtc::Ptx,
 };
+use half::{bf16, f16};
 use std::sync::Arc;
 
 use crate::modules;
@@ -14,9 +15,24 @@ pub trait DTypeLike: DeviceRepr + ValidAsZeroBits + Clone + Copy {
     const DTYPE: &'static str;
 }
 
-impl DTypeLike for f32 {
-    const DTYPE: &'static str = "f32";
+macro_rules! instantiate_dtypelike {
+    ($t:ty) => {
+        impl DTypeLike for $t {
+            const DTYPE: &'static str = stringify!($t);
+        }
+    };
 }
+instantiate_dtypelike!(f32);
+instantiate_dtypelike!(f16);
+instantiate_dtypelike!(bf16);
+instantiate_dtypelike!(u8);
+instantiate_dtypelike!(u16);
+instantiate_dtypelike!(u32);
+instantiate_dtypelike!(u64);
+instantiate_dtypelike!(i8);
+instantiate_dtypelike!(i16);
+instantiate_dtypelike!(i32);
+instantiate_dtypelike!(i64);
 
 #[derive(Debug, Clone)]
 pub struct Tensor<T: DTypeLike> {
@@ -26,43 +42,60 @@ pub struct Tensor<T: DTypeLike> {
 }
 
 impl<T: DTypeLike> Tensor<T> {
-    pub fn new_strided<S: Into<Shape>>(
-        data: CudaSlice<T>,
-        shape: S,
-        stride: Vec<usize>,
-        start_offset: usize,
-    ) -> Self {
-        let shape = shape.into();
-        Self {
+    pub fn from_raw(data: CudaSlice<T>, layout: Layout) -> anyhow::Result<Self> {
+        if data.len() != layout.shape().elem_count() {
+            anyhow::bail!(
+                "from_raw expects slice len {} to match layout elem count {}",
+                data.len(),
+                layout.shape().elem_count()
+            );
+        }
+        Ok(Self {
             stream: data.stream().clone(),
             data,
-            layout: Layout::new(shape, stride, start_offset),
-        }
+            layout,
+        })
     }
 
-    pub fn new_contiguous<S: Into<Shape>>(
-        data: CudaSlice<T>,
+    pub fn from_vec<S: Into<Shape>>(
+        stream: Arc<CudaStream>,
+        data: &[T],
         shape: S,
-        start_offset: usize,
-    ) -> Self {
-        let shape = shape.into();
-        Self {
-            stream: data.stream().clone(),
-            data,
-            layout: Layout::contiguous_with_offset(shape.clone(), start_offset),
+    ) -> anyhow::Result<Self> {
+        let layout = Layout::contiguous(shape);
+        if data.len() != layout.shape().elem_count() {
+            anyhow::bail!(
+                "from_vec expects host data len {} to match layout elem count {}",
+                data.len(),
+                layout.shape().elem_count()
+            );
         }
+        let dst = stream.memcpy_stod(data)?;
+        Self::from_raw(dst, layout)
     }
 
+    /// This returns a pre-sliced view of the tensor data.
     pub fn view(&self) -> CudaView<T> {
-        self.data.as_view()
+        self.data.as_view().slice(self.layout.start_offset()..)
     }
 
+    /// This returns a pre-sliced view of the tensor data.
     pub fn view_mut(&mut self) -> CudaViewMut<T> {
-        self.data.as_view_mut()
+        self.data
+            .as_view_mut()
+            .slice_mut(self.layout.start_offset()..)
     }
 
     pub fn into_slice(self) -> CudaSlice<T> {
         self.data
+    }
+
+    pub fn dims(&self) -> &[usize] {
+        self.shape().dims()
+    }
+
+    pub fn stride(&self) -> &[usize] {
+        self.layout.stride()
     }
 
     pub fn shape(&self) -> &Shape {
@@ -116,7 +149,7 @@ impl<T: DTypeLike> Tensor<T> {
             builder.arg(&mut out);
             unsafe { builder.launch(LaunchConfig::for_num_elems(elem_count as u32))? };
 
-            Ok(Self::new_contiguous(out, self.shape().clone(), 0))
+            Self::from_raw(out, Layout::contiguous(self.shape()))
         }
     }
 
@@ -132,27 +165,5 @@ impl<T: DTypeLike> Tensor<T> {
             anyhow::bail!("All tensors must be on the same device ordinal.")
         }
         Ok(())
-    }
-}
-
-impl<T: DTypeLike> Tensor<T> {
-    pub fn from_host<S: Into<Shape>>(
-        stream: Arc<CudaStream>,
-        data: &[T],
-        shape: S,
-        stride: Vec<usize>,
-    ) -> anyhow::Result<Self> {
-        let dst = stream.memcpy_stod(data)?;
-        Ok(Self::new_strided(dst, shape, stride, 0))
-    }
-
-    pub fn from_zeros<S: Into<Shape>>(
-        stream: Arc<CudaStream>,
-        len: usize,
-        shape: S,
-        stride: Vec<usize>,
-    ) -> anyhow::Result<Self> {
-        let dst = stream.alloc_zeros::<T>(len)?;
-        Ok(Self::new_strided(dst, shape, stride, 0))
     }
 }

@@ -1,18 +1,21 @@
 // linear.rs
-use crate::tensor::Tensor;
-use candle_core::{D, Shape};
+use crate::{DTypeLike, tensor::Tensor};
+use candle_core::{D, Layout, Shape};
 use cudarc::cublaslt::{CudaBlasLT, Matmul, MatmulConfig, MatmulShared};
 
-pub struct Linear {
-    pub weight: Tensor<f32>,
-    pub bias: Option<Tensor<f32>>,
+pub struct Linear<T: DTypeLike> {
+    pub weight: Tensor<T>,
+    pub bias: Option<Tensor<T>>,
     pub blaslt: CudaBlasLT,
 }
 
-impl Linear {
+impl<T: DTypeLike> Linear<T>
+where
+    CudaBlasLT: cudarc::cublaslt::Matmul<T>,
+{
     /// * `weight` - Input tensor of size BxNxK
-    /// * `.bias` - Optional bias tensor of size M
-    pub fn new(weight: Tensor<f32>, bias: Option<Tensor<f32>>) -> Self {
+    /// * `bias` - Optional bias tensor of size M
+    pub fn new(weight: Tensor<T>, bias: Option<Tensor<T>>) -> Self {
         let blaslt = CudaBlasLT::new(weight.stream()).unwrap();
         Self {
             weight,
@@ -26,7 +29,7 @@ impl Linear {
     /// * `self.bias` - Optional bias tensor of size M
     ///
     /// The resulting tensor is of shape BxMxN
-    pub fn forward(&self, input: &Tensor<f32>) -> anyhow::Result<Tensor<f32>> {
+    pub fn forward(&self, input: &Tensor<T>) -> anyhow::Result<Tensor<T>> {
         self.weight.verify_all_same_device(&[input])?;
         if let Some(b) = &self.bias {
             self.weight.verify_all_same_device(&[b])?;
@@ -57,7 +60,7 @@ impl Linear {
                 if bias_l.shape().dims1()? != m {
                     anyhow::bail!("Bias does not have the correct shape");
                 }
-                (Some(bias.view().slice(bias_l.start_offset()..)), None)
+                (Some(bias.view()), None)
             } else {
                 if bias_l.shape().dims2()?.1 != m {
                     anyhow::bail!("Bias does not have the correct shape");
@@ -66,10 +69,7 @@ impl Linear {
                     anyhow::bail!("Bias batch size must match batch size of `a`");
                 }
                 let bias_stride = bias_l.stride()[0] as i64;
-                (
-                    Some(bias.view().slice(bias_l.start_offset()..)),
-                    Some(bias_stride),
-                )
+                (Some(bias.view()), Some(bias_stride))
             }
         } else {
             (None, None)
@@ -77,7 +77,7 @@ impl Linear {
 
         let (mut out, stride_c) = {
             // Allocate out tensor
-            (stream.alloc_zeros::<f32>(out_shape.elem_count())?, (n * m))
+            (stream.alloc_zeros::<T>(out_shape.elem_count())?, (n * m))
         };
 
         unsafe {
@@ -108,7 +108,7 @@ impl Linear {
             )?;
         }
 
-        let res = Tensor::new_contiguous(out, out_shape, 0);
+        let res = Tensor::from_raw(out, Layout::contiguous(out_shape))?;
         res.transpose(D::Minus1, D::Minus2)
     }
 }

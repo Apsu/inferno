@@ -1177,6 +1177,7 @@ dependencies = [
  "bindgen_cuda",
  "candle-core",
  "cudarc",
+ "half",
  "hf-hub",
  "safetensors 0.5.3",
  "tokenizers",

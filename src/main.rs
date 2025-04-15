@@ -25,19 +25,9 @@ fn main() -> anyhow::Result<()> {
     ];
 
     // Create tensors with explicit column-major strides
-    let input = Tensor::from_host(
-        stream.clone(),
-        &x_host,
-        vec![batch_size, in_features],
-        vec![1, batch_size], // Column-major strides
-    )?;
+    let input = Tensor::from_vec(stream.clone(), &x_host, vec![batch_size, in_features])?;
 
-    let weight = Tensor::from_host(
-        stream.clone(),
-        &w_host,
-        vec![in_features, out_features],
-        vec![1, in_features], // Column-major strides
-    )?;
+    let weight = Tensor::from_vec(stream.clone(), &w_host, vec![in_features, out_features])?;
 
     let linear = Linear::new(weight, None);
     let output = linear.forward(&input)?;
