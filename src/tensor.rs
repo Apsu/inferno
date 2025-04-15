@@ -6,6 +6,7 @@ use cudarc::{
     },
     nvrtc::Ptx,
 };
+use half::{bf16, f16};
 use std::sync::Arc;
 
 use crate::modules;
@@ -14,9 +15,24 @@ pub trait DTypeLike: DeviceRepr + ValidAsZeroBits + Clone + Copy {
     const DTYPE: &'static str;
 }
 
-impl DTypeLike for f32 {
-    const DTYPE: &'static str = "f32";
+macro_rules! instantiate_dtypelike {
+    ($t:ty) => {
+        impl DTypeLike for $t {
+            const DTYPE: &'static str = stringify!($t);
+        }
+    };
 }
+instantiate_dtypelike!(f32);
+instantiate_dtypelike!(f16);
+instantiate_dtypelike!(bf16);
+instantiate_dtypelike!(u8);
+instantiate_dtypelike!(u16);
+instantiate_dtypelike!(u32);
+instantiate_dtypelike!(u64);
+instantiate_dtypelike!(i8);
+instantiate_dtypelike!(i16);
+instantiate_dtypelike!(i32);
+instantiate_dtypelike!(i64);
 
 #[derive(Debug, Clone)]
 pub struct Tensor<T: DTypeLike> {

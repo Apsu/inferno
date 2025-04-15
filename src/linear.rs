@@ -1,18 +1,21 @@
 // linear.rs
-use crate::tensor::Tensor;
+use crate::{DTypeLike, tensor::Tensor};
 use candle_core::{D, Layout, Shape};
 use cudarc::cublaslt::{CudaBlasLT, Matmul, MatmulConfig, MatmulShared};
 
-pub struct Linear {
-    pub weight: Tensor<f32>,
-    pub bias: Option<Tensor<f32>>,
+pub struct Linear<T: DTypeLike> {
+    pub weight: Tensor<T>,
+    pub bias: Option<Tensor<T>>,
     pub blaslt: CudaBlasLT,
 }
 
-impl Linear {
+impl<T: DTypeLike> Linear<T>
+where
+    CudaBlasLT: cudarc::cublaslt::Matmul<T>,
+{
     /// * `weight` - Input tensor of size BxNxK
-    /// * `.bias` - Optional bias tensor of size M
-    pub fn new(weight: Tensor<f32>, bias: Option<Tensor<f32>>) -> Self {
+    /// * `bias` - Optional bias tensor of size M
+    pub fn new(weight: Tensor<T>, bias: Option<Tensor<T>>) -> Self {
         let blaslt = CudaBlasLT::new(weight.stream()).unwrap();
         Self {
             weight,
@@ -26,7 +29,7 @@ impl Linear {
     /// * `self.bias` - Optional bias tensor of size M
     ///
     /// The resulting tensor is of shape BxMxN
-    pub fn forward(&self, input: &Tensor<f32>) -> anyhow::Result<Tensor<f32>> {
+    pub fn forward(&self, input: &Tensor<T>) -> anyhow::Result<Tensor<T>> {
         self.weight.verify_all_same_device(&[input])?;
         if let Some(b) = &self.bias {
             self.weight.verify_all_same_device(&[b])?;
@@ -77,7 +80,7 @@ impl Linear {
 
         let (mut out, stride_c) = {
             // Allocate out tensor
-            (stream.alloc_zeros::<f32>(out_shape.elem_count())?, (n * m))
+            (stream.alloc_zeros::<T>(out_shape.elem_count())?, (n * m))
         };
 
         unsafe {

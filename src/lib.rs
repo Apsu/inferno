@@ -5,4 +5,4 @@ pub mod tensor;
 
 pub use linear::Linear;
 pub use model::Module;
-pub use tensor::Tensor;
+pub use tensor::{DTypeLike, Tensor};
