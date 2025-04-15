@@ -8,41 +8,32 @@ fn test_linear_forward() {
     let stream = dev.default_stream();
     let blaslt = CudaBlasLT::new(stream.clone()).unwrap();
 
-    let in_features = 2;
-    let out_features = 2;
-    let batch_size = 1;
+    let b = 2;
+    let m = 3;
+    let n = 4;
+    let k = 5;
 
-    let x_host = vec![1.0f32, 2.0];
-    let w_host = vec![0.5, 0.1, 0.2, 0.3]; // 2x2 weight
-    let b_host = vec![0.01, 0.02];
+    let x_host = (0..b * m * k).map(|x| x as f32).collect::<Vec<_>>();
+    let w_host = (0..b * n * k).map(|x| x as f32).collect::<Vec<_>>();
+    let b_host = (0..b * m).map(|x| x as f32).collect::<Vec<_>>();
 
-    let input = Tensor::from_host(
-        stream.clone(),
-        &x_host,
-        vec![batch_size, in_features],
-        vec![1, batch_size],
-    )
-    .unwrap();
-    let weight = Tensor::from_host(
-        stream.clone(),
-        &w_host,
-        vec![in_features, out_features],
-        vec![1, in_features],
-    )
-    .unwrap();
-    let bias =
-        Tensor::from_host(stream.clone(), &b_host, vec![1, b_host.len()], vec![1, 1]).unwrap();
+    let input =
+        Tensor::from_host(stream.clone(), &x_host, vec![b, m, k], vec![m * k, k, 1]).unwrap();
+    let weight =
+        Tensor::from_host(stream.clone(), &w_host, vec![b, n, k], vec![n * k, k, 1]).unwrap();
+    let bias = Tensor::from_host(stream.clone(), &b_host, vec![b, m], vec![m, 1]).unwrap();
 
-    let linear = Linear::new(
-        weight.data,
-        Some(bias.data),
-        in_features,
-        out_features,
-        blaslt,
-    );
+    let linear = Linear::new(weight, Some(bias), k, n, blaslt);
     let output = linear.forward(&input).unwrap();
-    let out_host = stream.memcpy_dtov(&output.data).unwrap();
+    let out_host = stream.memcpy_dtov(&output.view()).unwrap();
 
-    assert_eq!(out_host.len(), out_features);
-    println!("Linear test output: {:?}", out_host);
+    assert_eq!(out_host.len(), b * m * n);
+    assert_eq!(output.shape().dims3().unwrap(), (b, n, m));
+    assert_eq!(
+        out_host,
+        [
+            30f32, 81., 132., 80., 256., 432., 130., 431., 732., 180., 606., 1032., 1883., 2434.,
+            2985., 2308., 2984., 3660., 2733., 3534., 4335., 3158., 4084., 5010.
+        ]
+    );
 }

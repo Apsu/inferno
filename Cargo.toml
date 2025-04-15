@@ -9,3 +9,4 @@ cudarc = { version = "0.15.1", features = ["cublas", "cublaslt", "cudnn", "f16",
 safetensors = "0.5.3"
 hf-hub = { version = "0.4.2", default-features = false, features = ["ureq", "tokio", "rustls-tls"] }
 tokenizers = { version = "0.21.1", features = ["hf-hub"] }
+candle-core = "0.8.4"
