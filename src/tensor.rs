@@ -91,7 +91,7 @@ impl<T: DTypeLike> Tensor<T> {
 
     pub fn contiguous(&self) -> anyhow::Result<Self> {
         if self.layout.is_contiguous() {
-            return Ok(self.clone());
+            Ok(self.clone())
         } else {
             let elem_count = self.shape().elem_count();
             let rank = self.shape().rank();
@@ -135,10 +135,10 @@ impl<T: DTypeLike> Tensor<T> {
     }
 }
 
-impl Tensor<f32> {
+impl<T: DTypeLike> Tensor<T> {
     pub fn from_host<S: Into<Shape>>(
         stream: Arc<CudaStream>,
-        data: &[f32],
+        data: &[T],
         shape: S,
         stride: Vec<usize>,
     ) -> anyhow::Result<Self> {
@@ -152,7 +152,7 @@ impl Tensor<f32> {
         shape: S,
         stride: Vec<usize>,
     ) -> anyhow::Result<Self> {
-        let dst = stream.alloc_zeros::<f32>(len)?;
+        let dst = stream.alloc_zeros::<T>(len)?;
         Ok(Self::new_strided(dst, shape, stride, 0))
     }
 }
