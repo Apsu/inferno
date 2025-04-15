@@ -1,6 +1,6 @@
 // linear.rs
 use crate::tensor::Tensor;
-use candle_core::{D, Shape};
+use candle_core::{D, Layout, Shape};
 use cudarc::cublaslt::{CudaBlasLT, Matmul, MatmulConfig, MatmulShared};
 
 pub struct Linear {
@@ -108,7 +108,7 @@ impl Linear {
             )?;
         }
 
-        let res = Tensor::new_contiguous(out, out_shape, 0);
+        let res = Tensor::from_raw(out, Layout::contiguous(out_shape))?;
         res.transpose(D::Minus1, D::Minus2)
     }
 }

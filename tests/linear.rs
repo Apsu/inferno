@@ -15,11 +15,9 @@ fn test_linear_forward() {
     let w_host = (0..b * n * k).map(|x| x as f32).collect::<Vec<_>>();
     let b_host = (0..b * m).map(|x| x as f32).collect::<Vec<_>>();
 
-    let input =
-        Tensor::from_host(stream.clone(), &x_host, vec![b, m, k], vec![m * k, k, 1]).unwrap();
-    let weight =
-        Tensor::from_host(stream.clone(), &w_host, vec![b, n, k], vec![n * k, k, 1]).unwrap();
-    let bias = Tensor::from_host(stream.clone(), &b_host, vec![b, m], vec![m, 1]).unwrap();
+    let input = Tensor::from_vec(stream.clone(), &x_host, vec![b, m, k]).unwrap();
+    let weight = Tensor::from_vec(stream.clone(), &w_host, vec![b, n, k]).unwrap();
+    let bias = Tensor::from_vec(stream.clone(), &b_host, vec![b, m]).unwrap();
 
     let linear = Linear::new(weight, Some(bias));
     let output = linear.forward(&input).unwrap();
